@@ -139,6 +139,12 @@ void UKF::ProcessMeasurement(MeasurementPackage meas_package) {
   // predict
   Prediction(dt);
 
+  // update
+  if (meas_package.sensor_type_ == MeasurementPackage::LASER && use_laser_) {
+    UpdateLidar(meas_package);
+  } else if (meas_package.sensor_type_ == MeasurementPackage::RADAR && use_radar_) {
+    UpdateRadar(meas_package);
+  }
 }
 
 /**
@@ -247,6 +253,10 @@ void UKF::UpdateLidar(MeasurementPackage meas_package) {
 
   You'll also need to calculate the lidar NIS.
   */
+  const unsigned int n_z = 2; // number of measurement
+  // predicted sigma points to measurement space
+  MatrixXd Zsig = Xsig_pred_.block(0, 0, n_z, n_sig_);
+  Update(meas_package, Zsig, n_z);
 }
 
 /**
@@ -262,7 +272,79 @@ void UKF::UpdateRadar(MeasurementPackage meas_package) {
 
   You'll also need to calculate the radar NIS.
   */
+  const unsigned int n_z = 3; // number of measurements
+  // predicted sigma points to measurement space
+  MatrixXd Zsig = MatrixXd(n_z, n_sig_);
+  for (unsigned int i = 0; i < n_sig_; i++) {
+    const double px = Xsig_pred_(0, i);
+    const double py = Xsig_pred_(1, i);
+    const double v = Xsig_pred_(2, i);
+    const double yaw = Xsig_pred_(3, i);
+    const double vx = cos(yaw)*v;
+    const double vy = sin(yaw)*v;
+
+    Zsig(0, i) = sqrt(px*px + py*py); // r
+    Zsig(1, i) = atan2(py, px); // phi
+    Zsig(2, i) = (px*vx + py*vy) / Zsig(0, i); //rho_dot
+  }
+  Update(meas_package, Zsig, n_z);
 }
+
+void UKF::Update(MeasurementPackage meas_package, MatrixXd Zsig, unsigned int n_z) {
+  // mean z
+  VectorXd z_pred = VectorXd(n_z);
+  z_pred = Zsig * weights_;
+  // measurment covariance
+  MatrixXd S = MatrixXd(n_z, n_z);
+  S.fill(0.0);
+  for (unsigned int i = 0; i < n_sig_; i++) {
+    VectorXd z_diff = Zsig.col(i) - z_pred;
+    z_diff(1) = NormalizeAngle(z_diff(1));
+    S += weights_(i) * z_diff * z_diff.transpose();
+  }
+  // include measurement noise
+  MatrixXd R = MatrixXd(n_z, n_z);
+  if (meas_package.sensor_type_ == MeasurementPackage::LASER) {
+    R = R_lidar_;
+  } else if (meas_package.sensor_type_ == MeasurementPackage::RADAR) {
+    R = R_radar_;
+  }
+  S += R;
+
+  // cross corelation
+  MatrixXd Tc = MatrixXd(n_x_, n_z);
+  Tc.fill(0.0);
+  for (unsigned int i =0; i < n_sig_; i++) {
+    VectorXd z_diff = Zsig.col(i) - z_pred;
+    if (meas_package.sensor_type_ == MeasurementPackage::RADAR) {
+      z_diff(1) = NormalizeAngle(z_diff(1));
+    }
+    // state diff
+    VectorXd x_diff = Xsig_pred_.col(i) - x_;
+    x_diff(3) = NormalizeAngle(x_diff(3));
+    Tc += weights_(i) * x_diff * z_diff.transpose();
+  }
+
+  // measurements
+  VectorXd z = meas_package.raw_measurements_;
+  // kalman gain
+  MatrixXd K = Tc * S.inverse();
+  VectorXd z_diff = z - z_pred;
+  if (meas_package.sensor_type_ == MeasurementPackage::RADAR) {
+      z_diff(1) = NormalizeAngle(z_diff(1));
+  }
+  // update state mean and covariance
+  x_ += K * z_diff;
+  P_ -= K * S * K.transpose();
+
+  // calculate NIS
+  if (meas_package.sensor_type_ == MeasurementPackage::RADAR) {
+    NIS_radar_ = z.transpose() * S.inverse() * z;
+  } else if (meas_package.sensor_type_ == MeasurementPackage::LASER) {
+    NIS_laser_ = z.transpose() * S.inverse() * z;
+  }
+}
+
 
 double UKF::NormalizeAngle(double angle) {
   return atan2(sin(angle), cos(angle));
