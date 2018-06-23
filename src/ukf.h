@@ -67,6 +67,15 @@ public:
   ///* Sigma point spreading parameter
   double lambda_;
 
+  ///* Number of sigma points
+  unsigned int n_sig_;
+
+  ///* Lidar measurement noise covariance
+  MatrixXd R_lidar_;
+
+  ///* Radar measurement noise covariance
+  MatrixXd R_radar_;
+
 
   /**
    * Constructor
