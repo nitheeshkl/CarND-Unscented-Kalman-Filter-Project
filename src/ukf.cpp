@@ -131,6 +131,14 @@ void UKF::ProcessMeasurement(MeasurementPackage meas_package) {
 
     return;
   }
+
+  // get time delta in seconds
+  double dt = (meas_package.timestamp_ - time_us_)/1000000.0;
+  time_us_ = meas_package.timestamp_;
+
+  // predict
+  Prediction(dt);
+
 }
 
 /**
@@ -138,13 +146,92 @@ void UKF::ProcessMeasurement(MeasurementPackage meas_package) {
  * @param {double} delta_t the change in time (in seconds) between the last
  * measurement and this one.
  */
-void UKF::Prediction(double delta_t) {
+void UKF::Prediction(double dt) {
   /**
   TODO:
 
   Complete this function! Estimate the object's location. Modify the state
   vector, x_. Predict sigma points, the state, and the state covariance matrix.
   */
+  const double dt_2 = dt*dt;
+
+  VectorXd x_aug = VectorXd(n_aug_); // augmented state
+  MatrixXd P_aug = MatrixXd(n_aug_, n_aug_); // augmented state covariance
+  MatrixXd Xsig_aug = MatrixXd(n_aug_, n_sig_); // sigma points
+
+  // setup matrixes. reuse code from quizes
+  x_aug.fill(0.0);
+  x_aug.head(n_x_) = x_;
+  P_aug.fill(0);
+  P_aug.topLeftCorner(n_x_, n_x_) = P_;
+  P_aug(5, 5) = std_a_ * std_a_;
+  P_aug(6, 6) = std_yawdd_ * std_yawdd_;
+  MatrixXd L = P_aug.llt().matrixL(); // sqrt of P_aug
+
+  // generate sigma points
+  Xsig_aug.col(0) = x_aug; // first col is same as state
+  const double sqrt_lambda_n_aug = sqrt(lambda_ + n_aug_);
+  VectorXd sqrt_lambda_n_aug_L;
+  for (unsigned int i = 0; i < n_aug_; i++) {
+    sqrt_lambda_n_aug_L = sqrt_lambda_n_aug * L.col(i);
+    Xsig_aug.col(i+1) = x_aug + sqrt_lambda_n_aug_L; // first half
+    Xsig_aug.col(i+1 + n_aug_) = x_aug - sqrt_lambda_n_aug_L; // second half
+  }
+
+  // predict sigma points
+  for (unsigned int i = 0; i < n_sig_; i++) {
+    const double px = Xsig_aug(0, i);
+    const double py = Xsig_aug(1, i);
+    const double v = Xsig_aug(2, i);
+    const double yaw = Xsig_aug(3, i);
+    const double yawd = Xsig_aug(4, i);
+    const double nu_a = Xsig_aug(5, i);
+    const double nu_yawd = Xsig_aug(6, i);
+
+    const double sin_yaw = sin(yaw);
+    const double cos_yaw = cos(yaw);
+    const double arg = yaw + yawd*dt;
+
+    // predict state
+    double px_pred, py_pred;
+    // div-by-zero check
+    if (fabs(yawd) > EPS) {
+      const double v_yawd = v/yawd;
+      px_pred = px + v_yawd * (sin(arg) - sin_yaw);
+      py_pred = py + v_yawd * (cos_yaw - cos(arg));
+    } else {
+      const double v_dt = v*dt;
+      px_pred = px + v_dt*cos_yaw;
+      py_pred = py + v_dt*sin_yaw;
+    }
+
+    double v_pred = v;
+    double yaw_pred = arg;
+    double yawd_pred = yawd;
+
+    // include noise
+    px_pred += 0.5 * nu_a * dt_2 * cos_yaw;
+    py_pred += 0.5 * nu_a * dt_2 * sin_yaw;
+    v_pred += nu_a * dt;
+    yaw_pred += 0.5 * nu_yawd * dt_2;
+    yawd_pred += nu_yawd  * dt;
+
+    Xsig_pred_(0, i) = px_pred;
+    Xsig_pred_(1, i) = py_pred;
+    Xsig_pred_(2, i) = v_pred;
+    Xsig_pred_(3, i) = yaw_pred;
+    Xsig_pred_(4, i) = yawd_pred;
+  }
+
+  // predict state mean
+  x_ = Xsig_pred_ * weights_;
+  // predict state covariance
+  P_.fill(0.0);
+  for (unsigned int i = 0; i < n_sig_; i++) {
+    VectorXd x_diff = Xsig_pred_.col(i) - x_;
+    x_diff(3) = NormalizeAngle(x_diff(3));
+    P_ += weights_(i) * x_diff * x_diff.transpose();
+  }
 }
 
 /**
@@ -175,4 +262,8 @@ void UKF::UpdateRadar(MeasurementPackage meas_package) {
 
   You'll also need to calculate the radar NIS.
   */
+}
+
+double UKF::NormalizeAngle(double angle) {
+  return atan2(sin(angle), cos(angle));
 }
