@@ -59,16 +59,16 @@ public:
   VectorXd weights_;
 
   ///* State dimension
-  unsigned int n_x_;
+  int n_x_;
 
   ///* Augmented state dimension
-  unsigned int n_aug_;
+  int n_aug_;
 
   ///* Sigma point spreading parameter
   double lambda_;
 
   ///* Number of sigma points
-  unsigned int n_sig_;
+  int n_sig_;
 
   ///* Lidar measurement noise covariance
   MatrixXd R_lidar_;
@@ -120,7 +120,7 @@ public:
   /*
    * Common update logic for UKF
    */
-  void Update(MeasurementPackage meas_pakage, MatrixXd Zsig, unsigned int n_z);
+  void Update(MeasurementPackage meas_pakage, MatrixXd Zsig, int n_z);
 
   /*
    * Normalize angle betwee 0 and 2*pi
